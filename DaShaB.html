@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>黄色雕像 · 大厦比</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ======================================================
+// 1. 场景：整个 3D 世界的容器
+// ======================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000); // 纯黑背景，突出底光效果
+
+// ======================================================
+// 2. 相机：决定你从哪里看
+// ======================================================
+const camera = new THREE.PerspectiveCamera(
+  45,                                      // 视野角度
+  window.innerWidth / window.innerHeight,  // 宽高比
+  0.1,                                     // 近裁剪面
+  200                                      // 远裁剪面
+);
+// 相机放得稍微低一点，方便看到从下往上打的光
+camera.position.set(0, 1.2, 7.5);
+
+// ======================================================
+// 3. 渲染器：把场景画到网页上
+// ======================================================
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// 电影级色调映射，让高光和暗部过渡更自然
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+// ======================================================
+// 4. 灯光：核心需求——全部从下往上打
+// ======================================================
+// 主光：正下方，垂直向上照
+const lightBottom = new THREE.PointLight(0xffcc33, 18, 30, 2);
+lightBottom.position.set(0, -1.8, 0);
+scene.add(lightBottom);
+
+// 前下方补光
+const lightFront = new THREE.PointLight(0xffaa22, 30, 25, 2);
+lightFront.position.set(0, -0.5, 3);
+scene.add(lightFront);
+
+// 后下方补光（让背面也有轮廓）
+const lightBack = new THREE.PointLight(0xffaa22, 30, 25, 2);
+lightBack.position.set(0, -0.5, -3);
+scene.add(lightBack);
+
+// 极弱环境光，避免暗部完全死黑
+const ambient = new THREE.AmbientLight(0x221100, 0.6);
+scene.add(ambient);
+
+// ======================================================
+// 5. 金色金属材质：底座和面板边框共用
+// ======================================================
+const goldMat = new THREE.MeshStandardMaterial({
+  color: 0xffcc33,        // 金黄色
+  metalness: 0.9,         // 金属感强
+  roughness: 0.25,        // 比较光滑
+  emissive: 0x3a2600,     // 自发光（暗金色），让暗部不至于全黑
+  emissiveIntensity: 0.4
+});
+
+// ======================================================
+// 6. 底座：圆柱形，站台
+// ======================================================
+const baseGeo = new THREE.CylinderGeometry(
+  1.7,   // 顶部半径
+  2.0,   // 底部半径（上窄下宽，更稳）
+  0.7,   // 高度
+  64     // 圆周分段
+);
+const base = new THREE.Mesh(baseGeo, goldMat);
+base.position.y = 0.35;   // 让底座底部贴地 y=0
+scene.add(base);
+
+// 底座顶部的一圈装饰环
+const ringGeo = new THREE.CylinderGeometry(1.75, 1.75, 0.08, 64);
+const ring = new THREE.Mesh(ringGeo, goldMat);
+ring.position.y = 0.72;
+scene.add(ring);
+
+// ======================================================
+// 7. 用 Canvas 画“大厦比”三个字，生成贴图
+// ======================================================
+function makeTextTexture(text) {
+  const W = 1024;
+  const H = 512;
+
+  // 创建一个离屏 canvas
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // 深色牌匾底色
+  ctx.fillStyle = '#0a0800';
+  ctx.fillRect(0, 0, W, H);
+
+  // 金色边框
+  ctx.strokeStyle = '#ffcc33';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(20, 20, W - 40, H - 40);
+
+  // 文字
+  ctx.font = 'bold 220px "Microsoft YaHei", "PingFang SC", "Heiti SC", "SimHei", sans-serif';
+  ctx.fillStyle = '#ffcc33';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#ffaa00';
+  ctx.shadowBlur = 40;      // 金色光晕
+  ctx.fillText(text, W / 2, H / 2 + 12);
+
+  // 把 canvas 变成 Three.js 能用的纹理
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+const textTexture = makeTextTexture('大厦比');
+
+// ======================================================
+// 8. 面板：贴文字的一块立体牌匾
+// ======================================================
+const panelMat = new THREE.MeshStandardMaterial({
+  map: textTexture,          // 贴上刚才画的文字
+  metalness: 0.3,
+  roughness: 0.5,
+  emissive: 0x110800,
+  emissiveIntensity: 0.5
+});
+
+const panelGeo = new THREE.BoxGeometry(3.6, 1.8, 0.35);
+
+// BoxGeometry 有 6 个面，材质顺序是：
+//  [+x, -x, +y, -y, +z, -z]
+//  正面(+z)和背面(-z)用文字贴图，其余面用金色
+const panel = new THREE.Mesh(panelGeo, [
+  goldMat, goldMat, goldMat, goldMat,   // 上下左右四面：金色
+  panelMat, panelMat                    // 前后两面：文字
+]);
+panel.position.set(0, 1.66, 0);
+scene.add(panel);
+
+// ======================================================
+// 9. 鼠标控制器：可拖拽旋转、滚轮缩放
+// ======================================================
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.5, 0);        // 视角看向雕像中部
+controls.enableDamping = true;          // 拖拽有惯性
+controls.dampingFactor = 0.05;
+controls.minDistance = 4;
+controls.maxDistance = 18;
+controls.maxPolarAngle = Math.PI * 0.85; // 不让相机钻到地面以下
+controls.update();
+
+// ======================================================
+// 10. 动画循环：每一帧重新渲染
+// ======================================================
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ======================================================
+// 11. 窗口大小变化自适应
+// ======================================================
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+});
+</script>
+</body>
+</html>
